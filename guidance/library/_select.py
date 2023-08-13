@@ -60,7 +60,7 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
     token_map = pygtrie.Trie()
     for i,option in enumerate(options_tokens):
         token_map[option] = i
-    
+
     async def recursive_select(current_prefix, allow_token_extension=True):
         """ This returns a dictionary of scores for each option (keyed by the option index).
         """
@@ -82,8 +82,8 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
             return logprobs_out
         else:
             match_index = len(current_prefix)
-            for i in range(len(current_prefix), min([len(o[0]) for o in extension_options])):
-                if len(set([o[0][i] for o in extension_options])) > 1:
+            for i in range(len(current_prefix), min(len(o[0]) for o in extension_options)):
+                if len({o[0][i] for o in extension_options}) > 1:
                     break
                 match_index += 1
             if match_index > len(current_prefix):
@@ -96,7 +96,9 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
             logit_bias[option_tokens[match_index]] = 100
 
         # check for where we are at the end of the prefix
-        if len(logit_bias) == 0 and current_prefix in [o[0] for o in extension_options]:
+        if not logit_bias and current_prefix in [
+            o[0] for o in extension_options
+        ]:
             logprobs_out[current_prefix] = 0
             return logprobs_out
 
@@ -112,18 +114,18 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
         gen_obj = gen_obj["choices"][0] # get the first choice (we only asked for one)
         if "logprobs" in gen_obj:
             logprobs_result = gen_obj["logprobs"]
-            
+
             # convert the logprobs keys from string back to token ids
             top_logprobs = {}
             for k,v in logprobs_result["top_logprobs"][0].items():
                 id = parser.program.llm.token_to_id(k)
                 top_logprobs[id] = v
-        
+
         # this happens if LLM does not return logprobs (like an OpenAI chat model)
         else:
             assert logprobs is None, "You cannot ask for the logprobs in a select call when using a model that does not return logprobs!"
             top_logprobs = {parser.program.llm.token_to_id(gen_obj["text"]): 0}
-        
+
         # no need to explore all branches if we are just taking the greedy max
         if logprobs is None:
             max_key = max(top_logprobs, key=top_logprobs.get)
@@ -143,7 +145,7 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
                 logprobs_out[k] = np.log(or_prob)
 
         return logprobs_out
-        
+
     # recursively compute the logprobs for each option
     option_logprobs = await recursive_select([])
 
@@ -155,7 +157,7 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
 
     # select the option with the highest logprob
     selected_option = max(option_logprobs, key=option_logprobs.get)
-    
+
     # see if we are appending to a list or not
     if list_append:
         value_list = parser.get_variable(variable_name, [])
@@ -169,10 +171,10 @@ async def select(variable_name="selected", options=None, logprobs=None, list_app
         parser.set_variable(variable_name, selected_option)
         if logprobs is not None:
             parser.set_variable(logprobs, option_logprobs)
-    
+
     if max(option_logprobs.values()) <= -1000:
         raise ValueError("No valid option generated in #select! Please post a GitHub issue since this should not happen :)")
-    
+
     partial_output(selected_option)
 
 select.is_block = True

@@ -73,29 +73,29 @@ async def geneach(list_name, stop=None, max_iterations=100, min_iterations=0, nu
     #         if next_text.startswith(quote_type) and prev_text.endswith(quote_type):
     #             stop = quote_type
     #             break
-                
+
     #     # auto-detect XML tag stop tokens
     #     if stop is None:
     #         m = re.match(r"^\s*(</[^>]+>)", next_text, re.DOTALL) #next_text.startswith(end_tag)
     #         if m is not None:
     #             stop = m.group(1)
-            
+
     #         m = re.match(r"^\s*(<|im_end|>)", next_text, re.DOTALL) #next_text.startswith(end_tag)
     #         if m is not None:
     #             stop = "<|im_end|>"
-            
+
     #         if next_text != "":
     #             stop = next_text
 
     out = []
     partial_out = ""
-    
+
     # convert stop strings to tokens
     if stop is not False:
         if stop is None:
             max_stop_tokens = 2
         else:
-            max_stop_tokens = max([len(parser.program.llm.encode(s)) for s in stop]) + 2
+            max_stop_tokens = max(len(parser.program.llm.encode(s)) for s in stop) + 2
 
     if not single_call:
         i = 0
@@ -106,30 +106,28 @@ async def geneach(list_name, stop=None, max_iterations=100, min_iterations=0, nu
             parser.variable_stack[-1]["@first"] = i == 0
             parser.variable_stack[-1]["this"] = {}
             pos = len(parser.prefix)
-            
+
             # add the join string if we are not on the first iteration
             if i > 0 and join != "":
                 partial_output(join)
-            
+
             await parser.visit(block_content[0]) # fills out parser.prefix
             block_variables = parser.variable_stack.pop()["this"]
 
             # update the list variable (we do this each time we get a new item so that streaming works)
             parser.set_variable(list_name, parser.get_variable(list_name, default_value=[]) + [block_variables])
-            
+
             if hidden:
                 # new_content = parser.prefix[pos:]
                 parser.reset_prefix(pos)
             if not parser.executing:
                 block_text = parser.prefix[pos:]
                 block_text = block_text # make any unfinished this. references point to the last (unfinished) item
-                parser.prefix = parser.prefix[:pos] + parser.prefix[pos:].replace("this.", list_name+"[-1].")
+                parser.prefix = parser.prefix[:pos] + parser.prefix[
+                    pos:
+                ].replace("this.", f"{list_name}[-1].")
                 break
             i += 1
-
-            # see if we hit an await and so are not executing anymore
-            if not parser.executing:
-                break
 
             # check if the block has thrown a stop iteration signal
             if parser.caught_stop_iteration:
@@ -145,17 +143,18 @@ async def geneach(list_name, stop=None, max_iterations=100, min_iterations=0, nu
                 try:
                     gen_obj = await parser.llm_session(strip_markers(parser.prefix), stop=stop, max_tokens=max_stop_tokens, temperature=0, cache_seed=0)
                 except Exception:
-                    raise Exception(f"Error generating stop tokens for geneach loop. Perhaps you are outside of role tags (assistant/user/system)? If you don't want the loop to check for stop tokens, set stop=False or set num_iterations.")
+                    raise Exception(
+                        "Error generating stop tokens for geneach loop. Perhaps you are outside of role tags (assistant/user/system)? If you don't want the loop to check for stop tokens, set stop=False or set num_iterations."
+                    )
                 if gen_obj["choices"][0]["finish_reason"] == "stop":
                     break
-    
-    # TODO: right now single_call is a bit hacky, we should make it more robust to rich loop item template structures
+
     else: # if single_call
         # create a pattern to match each item
         pattern = re.sub(
             r'{{gen [\'"]([^\'"]+)[\'"][^}]*}}',
-            lambda x: r"(?P<"+_escape_group_name(x.group(1))+">.*?)",
-            block_content[0].text
+            lambda x: f"(?P<{_escape_group_name(x.group(1))}>.*?)",
+            block_content[0].text,
         )
 
         # fixed prefixes can be used if we know we have at least one iteration
@@ -167,7 +166,11 @@ async def geneach(list_name, stop=None, max_iterations=100, min_iterations=0, nu
             fixed_prefix = ""
 
         # assume the LLM will also generate whatever interpolations are in the pattern
-        pattern = re.sub(r"{{(.*?)}}", lambda x: r"(?P<" + _escape_group_name(x.group(1)) + ">.*?)", pattern)
+        pattern = re.sub(
+            r"{{(.*?)}}",
+            lambda x: f"(?P<{_escape_group_name(x.group(1))}>.*?)",
+            pattern,
+        )
 
         # generate the looped content
         if single_call_temperature > 0:
@@ -186,7 +189,7 @@ async def geneach(list_name, stop=None, max_iterations=100, min_iterations=0, nu
             # parse the generated content (this assumes the generated content is syntactically correct)
             matches = re.finditer(pattern, generated_value)
             for m in matches:#"{{!--" + f"GMARKER_START_{name}${node_text}$}}{out}{{!--GMARKER_END_{name}$$" + "}}"
-                
+
                 # consume the generated value up to the match
                 generated_value = generated_value[m.end():]
 
@@ -223,30 +226,14 @@ async def geneach(list_name, stop=None, max_iterations=100, min_iterations=0, nu
                 # if we have hit the max iterations, stop the LLM
                 if num_items >= max_iterations:
                     gen_stream.close()
-    
+
     partial_output("{{!--GMARKER_each$$--}}") # end marker
 
-    # parser.get_variable(list, [])
-    #parser.set_variable(list_name, parser.get_variable(list_name, default_value=[]) + data)
-   
-    # if we have stopped executing, we need to add the loop to the output so it can be executed later
-    if not parser.executing:
-        if isinstance(list_name, str):
+    if isinstance(list_name, str):
+        if not parser.executing:
             partial_output(parser_node.text)
 
     return ""
-    
-    if echo:
-        return "{{!--GMARKER_each$$--}}" + "{{!--GMARKER_each$$--}}".join(out) + "{{!--GMARKER_each$$--}}" + suffix
-    else:
-        id = uuid.uuid4().hex
-        l = len(out)
-        out_str = prefix + "{{!--" + f"GMARKER_each_noecho_start_{echo}_{l}${id}$" + "--}}"
-        for i, value in enumerate(out):
-            if i > 0:
-                out_str += "{{!--" + f"GMARKER_each_noecho_{echo}_{i}${id}$" + "--}}"
-            out_str += value
-        return out_str + "{{!--" + f"GMARKER_each_noecho_end${id}$" + "--}}"
 
         # return "{{!--GMARKER_each_noecho$$}}" + "{{!--GMARKER_each_noecho$$}}".join(out) + "{{!--GMARKER_each_noecho$$}}"
 geneach.is_block = True
