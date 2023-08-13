@@ -78,9 +78,7 @@ def test_stream_loop(llm):
 {{@index}}. "{{gen 'this'}}"
 {{/geneach}}""", llm=llm)
 
-    partials = []
-    for p in program(stream=True, silent=True):
-        partials.append(p.get("companies", []))
+    partials = [p.get("companies", []) for p in program(stream=True, silent=True)]
     assert len(partials) > 1
     assert len(partials[0]) < 5
     assert len(partials[-1]) == 5

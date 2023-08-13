@@ -77,7 +77,7 @@ def test_select_multi_path():
         "Hello, write me a sentence. {{select 'sentence' logprobs='probs' options=options}}",
         llm=llm
     )(options=options)
-    assert abs(1 - np.exp([l for l in out["probs"].values()]).sum()) < 1e-5
+    assert abs(1 - np.exp(list(out["probs"].values())).sum()) < 1e-5
     assert out["sentence"] in options
 
 def test_select_multi_path_with_suffix():
@@ -98,7 +98,7 @@ def test_select_multi_path_with_suffix():
         "Hello, write me a sentence. {{select 'sentence' logprobs='probs' options=options}} And this is the suffix.",
         llm=llm
     )(options=options)
-    assert abs(1 - np.exp([l for l in out["probs"].values()]).sum()) < 1e-5
+    assert abs(1 - np.exp(list(out["probs"].values())).sum()) < 1e-5
     assert out["sentence"] in options
 
 @pytest.mark.parametrize("llm", ["transformers:gpt2", "openai:text-curie-001"])

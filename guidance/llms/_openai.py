@@ -49,10 +49,9 @@ def add_text_to_chat_mode_generator(chat_mode):
 def add_text_to_chat_mode(chat_mode):
     if isinstance(chat_mode, types.GeneratorType):
         return add_text_to_chat_mode_generator(chat_mode)
-    else:
-        for c in chat_mode['choices']:
-            c['text'] = c['message']['content']
-        return chat_mode
+    for c in chat_mode['choices']:
+        c['text'] = c['message']['content']
+    return chat_mode
 
 # model that need to use the chat completion API
 chat_models = [
@@ -95,11 +94,7 @@ class OpenAI(LLM):
 
         # auto detect chat completion mode
         if chat_mode == "auto":
-            if model in chat_models:
-                chat_mode = True
-            else:
-                chat_mode = False
-        
+            chat_mode = model in chat_models
         # fill in default API key value
         if api_key is None: # get from environment variable
             api_key = os.environ.get("OPENAI_API_KEY", getattr(openai, "api_key", None))
@@ -121,7 +116,7 @@ class OpenAI(LLM):
         import tiktoken
         self._tokenizer = tiktoken.get_encoding(tiktoken.encoding_for_model(model).name)
         self.chat_mode = chat_mode
-        
+
         self.allowed_special_tokens = allowed_special_tokens
         self.model_name = model
         self.caching = caching
@@ -155,7 +150,7 @@ class OpenAI(LLM):
 
     def role_start(self, role):
         assert self.chat_mode, "role_start() can only be used in chat mode"
-        return "<|im_start|>"+role+"\n"
+        return f"<|im_start|>{role}" + "\n"
     
     def role_end(self, role=None):
         assert self.chat_mode, "role_end() can only be used in chat mode"
@@ -178,7 +173,7 @@ class OpenAI(LLM):
 
             current_strings = ["" for _ in range(n)]
             # last_out_pos = ["" for _ in range(n)]
-        
+
         # iterate through the stream
         all_done = False
         for curr_out in gen:
@@ -188,7 +183,7 @@ class OpenAI(LLM):
                 out = merge_stream_chunks(cached_out, curr_out)
             else:
                 out = curr_out
-            
+
             # check if we have stop_regex matches
             found_partial = False
             if stop_regex is not None:
@@ -213,8 +208,7 @@ class OpenAI(LLM):
                 stop_text = [None for _ in range(n)]
                 for i in range(len(current_strings)):
                     for s in stop_patterns:
-                        m = s.search(current_strings[i], partial=True)
-                        if m:
+                        if m := s.search(current_strings[i], partial=True):
                             span = m.span()
                             if span[1] > span[0]:
                                 if m.partial: # we might be starting a stop sequence, so we can't emit anything yet
@@ -225,12 +219,12 @@ class OpenAI(LLM):
                                     stop_pos[i] = min(span[0], stop_pos[i])
                     if stop_pos != 1e10:
                         stop_pos[i] = stop_pos[i] - len(current_strings[i]) # convert to relative position from the end
-            
+
             # if we might be starting a stop sequence, we need to cache the output and continue to wait and see
             if found_partial:
                 cached_out = out
                 continue
-            
+
             # if we get here, we are not starting a stop sequence, so we can emit the output
             else:
                 cached_out = None
@@ -242,13 +236,13 @@ class OpenAI(LLM):
                             out['choices'][i]['text'] = out['choices'][i]['text'][:stop_pos[i]]
                             out['choices'][i]['stop_text'] = stop_text[i]
                             out['choices'][i]['finish_reason'] = "stop"
-            
+
                 list_out.append(out)
                 yield out
                 if all_done:
                     gen.close()
                     break
-        
+
         # if we have a cached output, emit it
         if cached_out is not None:
             list_out.append(cached_out)
@@ -356,7 +350,7 @@ class OpenAI(LLM):
         try:
             response = requests.post(self.endpoint, headers=headers, json=data, stream=stream, timeout=60)
             if response.status_code != 200:
-                raise Exception("Response is not 200: " + response.text)
+                raise Exception(f"Response is not 200: {response.text}")
             if stream:
                 return self._rest_stream_handler(response)
             else:
